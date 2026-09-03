@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -12,13 +12,12 @@ model User {
   email        String      @unique
   passwordHash String
   name         String
-  role         String      @default("MEMBER") // "LIBRARIAN" or "MEMBER"
-  isDemo       Boolean     @default(false) // Restricted "demo" librarian: full visibility, no approval rights, member names hidden
+  role         String      @default("MEMBER")
+  isDemo       Boolean     @default(false)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
-
+  custodians   Custodian[]
   loans        Loan[]      @relation("BorrowerLoans")
-  custodians   Custodian[] 
   auditLogs    LoanEvent[] @relation("ActorAuditLogs")
 }
 
@@ -31,7 +30,6 @@ model CatalogueItem {
   isArchived  Boolean     @default(false)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
-
   custodians  Custodian[]
   loans       Loan[]
 }
@@ -40,40 +38,38 @@ model Custodian {
   id        String        @id @default(uuid())
   userId    String
   itemId    String
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  item      CatalogueItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
   createdAt DateTime      @default(now())
+  item      CatalogueItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, itemId])
 }
 
 model Loan {
-  id             String      @id @default(uuid())
+  id             String        @id @default(uuid())
   itemId         String
   borrowerId     String
-  status         String      @default("REQUESTED") // "REQUESTED", "ISSUED", "RETURNED", "LOST", "DECLINED"
-  requestedDate  DateTime    @default(now())
+  status         String        @default("REQUESTED")
+  requestedDate  DateTime      @default(now())
   issuedDate     DateTime?
   dueDate        DateTime?
   returnedDate   DateTime?
   notes          String?
-  alertDismissed Boolean     @default(false)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-
-  item           CatalogueItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  borrower       User          @relation("BorrowerLoans", fields: [borrowerId], references: [id], onDelete: Restrict)
+  alertDismissed Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  borrower       User          @relation("BorrowerLoans", fields: [borrowerId], references: [id])
+  item           CatalogueItem @relation(fields: [itemId], references: [id])
   events         LoanEvent[]
 }
 
 model LoanEvent {
-  id        String     @id @default(uuid())
+  id        String   @id @default(uuid())
   loanId    String
   actorId   String
-  action    String     // "REQUESTED", "ISSUED", "RETURNED", "LOST", "DECLINED", "ALERT_DISMISSED", "NOTE_ADDED"
+  action    String
   notes     String?
-  timestamp DateTime   @default(now())
-
-  loan      Loan       @relation(fields: [loanId], references: [id], onDelete: Restrict)
-  actor     User       @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: Restrict)
+  timestamp DateTime @default(now())
+  actor     User     @relation("ActorAuditLogs", fields: [actorId], references: [id])
+  loan      Loan     @relation(fields: [loanId], references: [id])
 }
