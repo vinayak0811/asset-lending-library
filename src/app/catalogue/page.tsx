@@ -220,6 +220,9 @@ export default function CataloguePage() {
   const [formLoading, setFormLoading] =
     useState(false);
 
+  const [deletingItem, setDeletingItem] =
+    useState(false);
+
   // ==========================================================
   // DETAIL MODAL STATE
   // ==========================================================
@@ -597,6 +600,54 @@ export default function CataloguePage() {
         "Archive action failed:",
         error
       );
+    }
+  };
+
+  // ==========================================================
+  // DELETE ITEM
+  // ==========================================================
+
+  const handleDeleteItem = async (
+    item: Item
+  ) => {
+    const confirmed = window.confirm(
+      `Delete "${item.title}"? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setDeletingItem(true);
+    setFormError("");
+
+    try {
+      const res = await fetch(
+        `/api/catalogue/${item.id}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        }
+      );
+
+      const data = await res
+        .json()
+        .catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(
+          data.error ||
+            "Failed to delete item"
+        );
+      }
+
+      setIsEditModalOpen(false);
+      setIsDetailModalOpen(false);
+      await fetchItems();
+    } catch (error: any) {
+      setFormError(
+        error.message ||
+          "Failed to delete item"
+      );
+    } finally {
+      setDeletingItem(false);
     }
   };
 
@@ -1527,6 +1578,38 @@ export default function CataloguePage() {
                         ? "Restore Item"
                         : "Archive Item"}
 
+                    </button>
+
+                  </div>
+                )}
+
+              {/* Delete */}
+
+              {isEditModalOpen &&
+                selectedItem && (
+
+                  <div className="pt-2 flex items-center justify-between">
+
+                    <span className="text-sm text-gray-700">
+                      Delete this item permanently
+                    </span>
+
+                    <button
+                      type="button"
+                      disabled={deletingItem}
+                      onClick={() =>
+                        handleDeleteItem(
+                          selectedItem
+                        )
+                      }
+                      className="px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-2 transition-colors bg-red-50 text-red-600 hover:bg-red-100 border border-red-100 disabled:opacity-50"
+                    >
+                      {deletingItem ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
+                      Delete Item
                     </button>
 
                   </div>

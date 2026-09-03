@@ -14,6 +14,7 @@ import {
   X,
   Mail,
   Calendar,
+  Trash2,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
@@ -43,6 +44,9 @@ export default function MembersPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const isLibrarian = user?.role === "LIBRARIAN";
   const isDemo = !!user?.isDemo;
@@ -109,6 +113,35 @@ export default function MembersPage() {
       setFormError(err.message || "Failed to create account.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (member: MemberRow) => {
+    setDeleteError(null);
+
+    const confirmed = window.confirm(
+      `Delete ${member.name}'s account? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setDeletingId(member.id);
+    try {
+      const res = await fetch(`/api/users/${member.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to delete account.");
+      }
+
+      setUsers((prev) => prev.filter((u) => u.id !== member.id));
+    } catch (err: any) {
+      setDeleteError(err.message || "Failed to delete account.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -283,6 +316,13 @@ export default function MembersPage() {
         </div>
       )}
 
+      {deleteError && (
+        <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-md border border-red-100 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          {deleteError}
+        </div>
+      )}
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         {loading ? (
           <div className="p-12 text-center">
@@ -298,6 +338,7 @@ export default function MembersPage() {
                 <th className="px-6 py-3">Email</th>
                 <th className="px-6 py-3">Role</th>
                 <th className="px-6 py-3">Joined</th>
+                {!isDemo && <th className="px-6 py-3 text-right">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -340,6 +381,25 @@ export default function MembersPage() {
                       {u.createdAt ? format(parseISO(u.createdAt), "MMM d, yyyy") : "—"}
                     </span>
                   </td>
+                  {!isDemo && (
+                    <td className="px-6 py-4 text-right">
+                      {u.id !== user?.id && (
+                        <button
+                          onClick={() => handleDelete(u)}
+                          disabled={deletingId === u.id}
+                          title="Delete account"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md border border-red-100 transition-colors disabled:opacity-50"
+                        >
+                          {deletingId === u.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                          Delete
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
                 );
               })}

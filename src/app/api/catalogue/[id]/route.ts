@@ -149,3 +149,63 @@ export async function PATCH(
     );
   }
 }
+
+/**
+ * Librarian-only: permanently delete a catalogue item.
+ *
+ * An item cannot be deleted if it has any loan history (active or
+ * past), since loans keep a foreign key back to the item for audit
+ * purposes. Custodian assignments are removed automatically.
+ */
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    await requireFullLibrarian();
+
+    const existing = await prisma.catalogueItem.findUnique({
+      where: { id: params.id },
+    });
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Catalogue item not found." },
+        { status: 404 }
+      );
+    }
+
+    const loanCount = await prisma.loan.count({
+      where: { itemId: params.id },
+    });
+
+    if (loanCount > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "This item has loan history and cannot be deleted. Archive it instead if it's no longer in use.",
+        },
+        { status: 409 }
+      );
+    }
+
+    await prisma.$transaction([
+      prisma.custodian.deleteMany({ where: { itemId: params.id } }),
+      prisma.catalogueItem.delete({ where: { id: params.id } }),
+    ]);
+
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    if (err.message === "UNAUTHORIZED" || err.message === "FORBIDDEN") {
+      return NextResponse.json(
+        { error: "Only librarians can delete catalogue items." },
+        { status: 403 }
+      );
+    }
+    console.error("Error deleting catalogue item:", err);
+    return NextResponse.json(
+      { error: "Failed to delete catalogue item." },
+      { status: 500 }
+    );
+  }
+}
