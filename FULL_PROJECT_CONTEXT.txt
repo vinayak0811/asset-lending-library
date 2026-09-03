@@ -1,0 +1,650 @@
+================================================================================
+ASSET LENDING LIBRARY - FULL CODEBASE & DOCUMENTATION DUMP
+================================================================================
+Generated: 2026-09-02
+Project Root: C:\Users\user\.gemini\antigravity\scratch\asset-lending-library
+
+TABLE OF CONTENTS:
+1. package.json
+2. tsconfig.json
+3. next.config.js
+4. tailwind.config.ts
+5. postcss.config.js
+6. .env.example
+7. prisma/schema.prisma
+8. prisma/seed.ts
+9. src/types/index.ts
+10. src/middleware.ts
+11. src/lib/prisma.ts
+12. src/lib/auth.ts
+13. src/lib/loan-rules.ts
+14. src/lib/csv-helper.ts
+15. src/context/AuthContext.tsx
+16. src/components/Navbar.tsx
+17. src/components/StatusBadge.tsx
+18. src/components/LoanTimeline.tsx
+19. src/components/BulkImportModal.tsx
+20. src/app/globals.css
+21. src/app/layout.tsx
+22. src/app/page.tsx
+23. src/app/login/page.tsx
+24. src/app/dashboard/page.tsx
+25. src/app/catalogue/page.tsx
+26. src/app/loans/page.tsx
+27. src/app/alerts/page.tsx
+28. src/app/api/auth/login/route.ts
+29. src/app/api/auth/logout/route.ts
+30. src/app/api/auth/me/route.ts
+31. src/app/api/catalogue/route.ts
+32. src/app/api/catalogue/[id]/route.ts
+33. src/app/api/catalogue/import/route.ts
+34. src/app/api/loans/route.ts
+35. src/app/api/loans/[id]/route.ts
+36. src/app/api/loans/[id]/transition/route.ts
+37. src/app/api/loans/bulk-return/route.ts
+38. src/app/api/loans/export/route.ts
+39. src/app/api/alerts/route.ts
+40. src/app/api/alerts/[loanId]/dismiss/route.ts
+41. src/app/api/dashboard/route.ts
+42. src/app/api/users/route.ts
+43. docs/architecture.md
+44. docs/schema.md
+45. docs/plan.md
+46. docs/decisions.md
+47. docs/ai-prompts.md
+48. SUBMISSION.md
+49. README.md
+
+================================================================================
+FILE: package.json
+================================================================================
+{
+  "name": "asset-lending-library",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:push": "prisma db push",
+    "prisma:seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "jose": "^5.9.6",
+    "lucide-react": "^0.460.0",
+    "next": "14.2.18",
+    "papaparse": "^5.4.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.13.3",
+    "tailwind-merge": "^2.5.5"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.17.6",
+    "@types/papaparse": "^5.3.15",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "prisma": "^5.22.0",
+    "tailwindcss": "^3.4.15",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}
+
+================================================================================
+FILE: prisma/schema.prisma
+================================================================================
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String
+  name         String
+  role         String      @default("MEMBER") // "LIBRARIAN" or "MEMBER"
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  loans        Loan[]      @relation("BorrowerLoans")
+  custodians   Custodian[] 
+  auditLogs    LoanEvent[] @relation("ActorAuditLogs")
+}
+
+model CatalogueItem {
+  id          String      @id @default(uuid())
+  code        String      @unique
+  title       String
+  category    String
+  description String?
+  isArchived  Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  custodians  Custodian[]
+  loans       Loan[]
+}
+
+model Custodian {
+  id        String        @id @default(uuid())
+  userId    String
+  itemId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item      CatalogueItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+
+  @@unique([userId, itemId])
+}
+
+model Loan {
+  id             String      @id @default(uuid())
+  itemId         String
+  borrowerId     String
+  status         String      @default("REQUESTED") // "REQUESTED", "ISSUED", "RETURNED", "LOST"
+  requestedDate  DateTime    @default(now())
+  issuedDate     DateTime?
+  dueDate        DateTime?
+  returnedDate   DateTime?
+  notes          String?
+  alertDismissed Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  item           CatalogueItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  borrower       User          @relation("BorrowerLoans", fields: [borrowerId], references: [id], onDelete: Restrict)
+  events         LoanEvent[]
+}
+
+model LoanEvent {
+  id        String     @id @default(uuid())
+  loanId    String
+  actorId   String
+  action    String     // "REQUESTED", "ISSUED", "RETURNED", "LOST", "ALERT_DISMISSED", "NOTE_ADDED"
+  notes     String?
+  timestamp DateTime   @default(now())
+
+  loan      Loan       @relation(fields: [loanId], references: [id], onDelete: Restrict)
+  actor     User       @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: Restrict)
+}
+
+================================================================================
+FILE: src/types/index.ts
+================================================================================
+export type Role = "LIBRARIAN" | "MEMBER";
+export type LoanStatus = "REQUESTED" | "ISSUED" | "RETURNED" | "LOST";
+export type DisplayStatus = "REQUESTED" | "ISSUED" | "OVERDUE" | "RETURNED" | "LOST";
+
+export interface SessionUser {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+}
+
+export interface CatalogueItemDTO {
+  id: string;
+  code: string;
+  title: string;
+  category: string;
+  description: string | null;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+  custodians?: {
+    id: string;
+    userId: string;
+    user: {
+      id: string;
+      name: string;
+      email: string;
+    };
+  }[];
+  activeLoan?: LoanDTO | null;
+  loansCount?: number;
+}
+
+export interface LoanEventDTO {
+  id: string;
+  loanId: string;
+  actorId: string;
+  action: string;
+  notes: string | null;
+  timestamp: string;
+  actor: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  };
+}
+
+export interface LoanDTO {
+  id: string;
+  itemId: string;
+  borrowerId: string;
+  status: LoanStatus;
+  computedStatus: DisplayStatus;
+  requestedDate: string;
+  issuedDate: string | null;
+  dueDate: string | null;
+  returnedDate: string | null;
+  notes: string | null;
+  alertDismissed: boolean;
+  createdAt: string;
+  updatedAt: string;
+  item: {
+    id: string;
+    code: string;
+    title: string;
+    category: string;
+    isArchived: boolean;
+  };
+  borrower: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  events?: LoanEventDTO[];
+}
+
+export interface BulkImportRowResult {
+  rowNumber: number;
+  data: Record<string, string>;
+  error?: string;
+  success: boolean;
+}
+
+export interface BulkImportResponse {
+  totalProcessed: number;
+  successCount: number;
+  failedCount: number;
+  results: BulkImportRowResult[];
+}
+
+export interface BulkReturnItemResult {
+  loanId: string;
+  itemCode?: string;
+  itemTitle?: string;
+  success: boolean;
+  message: string;
+}
+
+export interface BulkReturnResponse {
+  totalRequested: number;
+  successCount: number;
+  failedCount: number;
+  results: BulkReturnItemResult[];
+}
+
+export interface DashboardMetrics {
+  itemsCurrentlyOut: number;
+  itemsOverdue: number;
+  loansReturnedThisWeek: number;
+  totalCatalogueItems: number;
+  loansByStatus: {
+    status: DisplayStatus;
+    count: number;
+  }[];
+  loansByCustodian: {
+    custodianName: string;
+    custodianEmail: string;
+    itemCount: number;
+    activeLoanCount: number;
+  }[];
+  returnsPerWeek: {
+    weekLabel: string;
+    startDate: string;
+    endDate: string;
+    count: number;
+  }[];
+}
+
+================================================================================
+FILE: src/lib/loan-rules.ts
+================================================================================
+import prisma from "./prisma";
+import { DisplayStatus, LoanStatus } from "@/types";
+
+export function isLoanOverdue(loan: {
+  status: string;
+  dueDate?: Date | string | null;
+}): boolean {
+  if (loan.status !== "ISSUED" || !loan.dueDate) {
+    return false;
+  }
+  const due = new Date(loan.dueDate);
+  return due.getTime() < Date.now();
+}
+
+export function getComputedStatus(loan: {
+  status: string;
+  dueDate?: Date | string | null;
+}): DisplayStatus {
+  if (loan.status === "ISSUED" && isLoanOverdue(loan)) {
+    return "OVERDUE";
+  }
+  return loan.status as DisplayStatus;
+}
+
+export function validateLoanTransition(
+  currentStatus: LoanStatus | string,
+  targetStatus: LoanStatus | string
+): { valid: boolean; reason?: string } {
+  if (currentStatus === targetStatus) {
+    return {
+      valid: false,
+      reason: `Loan is already in status '${currentStatus}'.`,
+    };
+  }
+
+  if (currentStatus === "RETURNED") {
+    return {
+      valid: false,
+      reason: "Cannot change the status of a loan that has already been returned.",
+    };
+  }
+
+  if (currentStatus === "LOST") {
+    return {
+      valid: false,
+      reason: "Cannot change the status of a loan that has been marked as lost.",
+    };
+  }
+
+  if (currentStatus === "REQUESTED") {
+    if (targetStatus === "ISSUED") {
+      return { valid: true };
+    }
+    return {
+      valid: false,
+      reason: `A requested loan must be issued before it can be '${targetStatus}'.`,
+    };
+  }
+
+  if (currentStatus === "ISSUED") {
+    if (targetStatus === "RETURNED" || targetStatus === "LOST") {
+      return { valid: true };
+    }
+    return {
+      valid: false,
+      reason: `An issued loan can only be returned or marked lost, not changed to '${targetStatus}'.`,
+    };
+  }
+
+  return {
+    valid: false,
+    reason: `Invalid transition from '${currentStatus}' to '${targetStatus}'.`,
+  };
+}
+
+export async function checkItemHasOpenLoan(
+  itemId: string,
+  excludeLoanId?: string
+): Promise<{ hasOpenLoan: boolean; openLoan?: any }> {
+  const openLoan = await prisma.loan.findFirst({
+    where: {
+      itemId,
+      status: {
+        in: ["REQUESTED", "ISSUED"],
+      },
+      ...(excludeLoanId ? { id: { not: excludeLoanId } } : {}),
+    },
+    include: {
+      borrower: { select: { id: true, name: true, email: true } },
+    },
+  });
+
+  return {
+    hasOpenLoan: !!openLoan,
+    openLoan,
+  };
+}
+
+export async function requestLoan(
+  itemId: string,
+  borrowerId: string,
+  notes?: string
+) {
+  const item = await prisma.catalogueItem.findUnique({
+    where: { id: itemId },
+  });
+
+  if (!item) {
+    throw new Error("Catalogue item not found.");
+  }
+
+  if (item.isArchived) {
+    throw new Error("Cannot request an archived catalogue item.");
+  }
+
+  const { hasOpenLoan, openLoan } = await checkItemHasOpenLoan(itemId);
+  if (hasOpenLoan) {
+    throw new Error(
+      `Cannot request item '${item.title}' (${item.code}) because it already has an open loan (${openLoan.status}) by ${openLoan.borrower.name}.`
+    );
+  }
+
+  return await prisma.$transaction(async (tx) => {
+    const loan = await tx.loan.create({
+      data: {
+        itemId,
+        borrowerId,
+        status: "REQUESTED",
+        notes,
+      },
+      include: {
+        item: true,
+        borrower: true,
+      },
+    });
+
+    await tx.loanEvent.create({
+      data: {
+        loanId: loan.id,
+        actorId: borrowerId,
+        action: "REQUESTED",
+        notes: notes || "Loan requested by borrower",
+      },
+    });
+
+    return loan;
+  });
+}
+
+export async function issueLoan(
+  loanId: string,
+  actorId: string,
+  dueDate: Date,
+  notes?: string
+) {
+  const loan = await prisma.loan.findUnique({
+    where: { id: loanId },
+    include: { item: true },
+  });
+
+  if (!loan) {
+    throw new Error("Loan not found.");
+  }
+
+  if (loan.item.isArchived) {
+    throw new Error("Cannot issue an archived catalogue item.");
+  }
+
+  const transitionCheck = validateLoanTransition(loan.status, "ISSUED");
+  if (!transitionCheck.valid) {
+    throw new Error(transitionCheck.reason);
+  }
+
+  const { hasOpenLoan, openLoan } = await checkItemHasOpenLoan(
+    loan.itemId,
+    loan.id
+  );
+  if (hasOpenLoan) {
+    throw new Error(
+      `Cannot issue item '${loan.item.title}' because it has another active loan (${openLoan.status}) by ${openLoan.borrower.name}.`
+    );
+  }
+
+  if (!dueDate || isNaN(dueDate.getTime())) {
+    throw new Error("A valid due date is required when issuing a loan.");
+  }
+
+  return await prisma.$transaction(async (tx) => {
+    const updated = await tx.loan.update({
+      where: { id: loanId },
+      data: {
+        status: "ISSUED",
+        issuedDate: new Date(),
+        dueDate,
+        notes: notes || loan.notes,
+      },
+      include: { item: true, borrower: true },
+    });
+
+    await tx.loanEvent.create({
+      data: {
+        loanId: loan.id,
+        actorId,
+        action: "ISSUED",
+        notes: notes ? `Issued with due date: ${dueDate.toISOString().split("T")[0]}. Note: ${notes}` : `Issued with due date: ${dueDate.toISOString().split("T")[0]}`,
+      },
+    });
+
+    return updated;
+  });
+}
+
+export async function returnLoan(
+  loanId: string,
+  actorId: string,
+  notes?: string
+) {
+  const loan = await prisma.loan.findUnique({
+    where: { id: loanId },
+    include: { item: true, borrower: true },
+  });
+
+  if (!loan) {
+    throw new Error("Loan not found.");
+  }
+
+  const transitionCheck = validateLoanTransition(loan.status, "RETURNED");
+  if (!transitionCheck.valid) {
+    throw new Error(transitionCheck.reason);
+  }
+
+  return await prisma.$transaction(async (tx) => {
+    const updated = await tx.loan.update({
+      where: { id: loanId },
+      data: {
+        status: "RETURNED",
+        returnedDate: new Date(),
+        alertDismissed: true,
+      },
+      include: { item: true, borrower: true },
+    });
+
+    await tx.loanEvent.create({
+      data: {
+        loanId: loan.id,
+        actorId,
+        action: "RETURNED",
+        notes: notes || "Item marked as returned by librarian",
+      },
+    });
+
+    return updated;
+  });
+}
+
+export async function markLoanLost(
+  loanId: string,
+  actorId: string,
+  notes?: string
+) {
+  const loan = await prisma.loan.findUnique({
+    where: { id: loanId },
+    include: { item: true, borrower: true },
+  });
+
+  if (!loan) {
+    throw new Error("Loan not found.");
+  }
+
+  const transitionCheck = validateLoanTransition(loan.status, "LOST");
+  if (!transitionCheck.valid) {
+    throw new Error(transitionCheck.reason);
+  }
+
+  return await prisma.$transaction(async (tx) => {
+    const updated = await tx.loan.update({
+      where: { id: loanId },
+      data: {
+        status: "LOST",
+        alertDismissed: true,
+      },
+      include: { item: true, borrower: true },
+    });
+
+    await tx.loanEvent.create({
+      data: {
+        loanId: loan.id,
+        actorId,
+        action: "LOST",
+        notes: notes || "Item marked as lost by librarian",
+      },
+    });
+
+    return updated;
+  });
+}
+
+export async function dismissLoanAlert(loanId: string, actorId: string) {
+  const loan = await prisma.loan.findUnique({
+    where: { id: loanId },
+  });
+
+  if (!loan) {
+    throw new Error("Loan not found.");
+  }
+
+  if (loan.status !== "ISSUED" || !isLoanOverdue(loan)) {
+    throw new Error("Loan is not currently overdue.");
+  }
+
+  return await prisma.$transaction(async (tx) => {
+    const updated = await tx.loan.update({
+      where: { id: loanId },
+      data: { alertDismissed: true },
+    });
+
+    await tx.loanEvent.create({
+      data: {
+        loanId: loan.id,
+        actorId,
+        action: "ALERT_DISMISSED",
+        notes: "Overdue loan alert dismissed by librarian",
+      },
+    });
+
+    return updated;
+  });
+}
