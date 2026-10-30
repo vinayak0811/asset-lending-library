@@ -43,7 +43,7 @@ npm run prisma:seed
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open https://asset-lending-library-k58x.vercel.app/login in your browser.
 
 ### Demo Accounts
 
